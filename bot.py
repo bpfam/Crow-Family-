@@ -1,8 +1,9 @@
 # =====================================================
 # CROW FAMILY BOT — FULL v1.6 PROTECT + PIN AUTO
+# - 3 bottoni: MENÙ, CONTATTI, VETRINA
 # - Menu + Info con bottone Indietro
 # - /status, /utenti (CSV), /backup, /restore_db (MERGE), /broadcast
-# - protect_content=True su tutti i contenuti
+# - protect_content=True su tutti i contenuti (tranne /backup)
 # - SOLO /backup è SBLOCCATO per il download
 # - Messaggio fissato AUTOMATICO: "👥 Iscritti Crow Family {totale}"
 # =====================================================
@@ -28,35 +29,41 @@ log = logging.getLogger("crow-family")
 
 # ---------------- ENV ----------------
 BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
-
-# devono puntare al DISK
-DB_FILE     = os.environ.get("DB_FILE", "/opt/render/project/data/users.db")
-BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/opt/render/project/data/backup")
+DB_FILE     = os.environ.get("DB_FILE", "/var/data/users.db")
+BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/var/data/backup")
 
 PHOTO_URL = os.environ.get(
     "PHOTO_URL",
+    # Logo di default: cambia qui o metti PHOTO_URL nelle variabili Render
     "https://i.postimg.cc/bv4ssL2t/2A3BDCFD-2D21-41BC-8BFA-9C5D238E5C3B.jpg",
 )
 
 WELCOME_TEXT = os.environ.get(
     "WELCOME_TEXT",
     "👑 Benvenuto nel BOT Ufficiale CROW FAMILY\n"
-    "Qui non entri per caso… qui entri se sei vero.\n\n"
-    "🔥 Qualità\n🤝 Rispetto\n🖤 Mentalità\n🐦 Famiglia prima di tutto\n\n"
+    "Qui non entri per caso… qui entri se sei VERO.\n\n"
+    "🔥 Qualità\n"
+    "🤝 Rispetto\n"
+    "🖤 Mentalità\n"
+    "🦅 Famiglia prima di tutto\n\n"
     "Resta connesso, segui gli aggiornamenti e fai parte di qualcosa di reale."
 )
+
 MENU_PAGE_TEXT = os.environ.get(
     "MENU_PAGE_TEXT",
-    "📖 MENÙ CROW FAMILY\n• Voce A\n• Voce B\n• Voce C"
+    "📖 MENÙ CROW FAMILY\n"
+    "Qui puoi inserire il tuo listino, info prodotti, regole, ecc."
 )
+
 INFO_PAGE_TEXT = os.environ.get(
     "INFO_PAGE_TEXT",
-    "📲 CONTATTI & INFO — CROW FAMILY"
+    "📲 CONTATTI — CROW FAMILY\n"
+    "Qui puoi mettere Telegram, Instagram, canali, ecc."
 )
 
 VETRINA_URL = os.environ.get(
     "VETRINA_URL",
-    "https://bpfam.github.io/Apulian-Dealer/index.html"   # puoi cambiarla dalla variabile
+    "https://bpfam.github.io/Apulian-Dealer/index.html"  # cambiala nelle variabili quando vuoi
 )
 
 # ---------------- ADMIN ----------------
@@ -145,16 +152,19 @@ def is_sqlite_db(path: str):
 
 # ---------------- KEYBOARD ----------------
 def kb_home():
+    # 3 bottoni: MENÙ, CONTATTI, VETRINA
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
             InlineKeyboardButton("📲 CONTATTI", callback_data="INFO"),
+        ],
+        [
             InlineKeyboardButton("🎥 VETRINA", url=VETRINA_URL),
-        ]
+        ],
     ])
 
 def kb_back():
-    return InlineKeyboardMarkup([[ 
+    return InlineKeyboardMarkup([[
         InlineKeyboardButton("⬅️ Indietro", callback_data="HOME")
     ]])
 
@@ -165,12 +175,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         upsert_user(u)
 
+    # Foto/logo protetto
     try:
         await chat.send_photo(PHOTO_URL, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio foto: {e}")
 
-    # Messaggio di benvenuto con TASTIERA (unica tastiera del bot)
+    # Messaggio di benvenuto con tastiera (3 bottoni)
     try:
         await chat.send_message(
             WELCOME_TEXT,
@@ -180,7 +191,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log.warning(f"Errore invio welcome: {e}")
 
-    # Messaggio iscritti SOLO TESTO, senza tastiera
+    # Messaggio fissato con numero iscritti
     try:
         total = count_users()
         stats_msg = await chat.send_message(
@@ -217,7 +228,10 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     await update.message.reply_text(
-        f"✅ Online v{VERSION}\n👥 Utenti: {count_users()}\nDB: {DB_FILE}\nBackup dir: {BACKUP_DIR}",
+        f"✅ Online v{VERSION}\n"
+        f"👥 Utenti: {count_users()}\n"
+        f"DB: {DB_FILE}\n"
+        f"Backup dir: {BACKUP_DIR}",
         protect_content=True
     )
 
@@ -275,6 +289,7 @@ async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption="✅ Backup pronto da scaricare"
         )
 
+# ✅ RESTORE MERGE (NON cancella, aggiorna/aggiunge utenti)
 async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -296,7 +311,10 @@ async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ok, why = is_sqlite_db(str(tmp))
     if not ok:
-        await update.message.reply_text(f"❌ Il file non è un DB SQLite valido: {why}", protect_content=True)
+        await update.message.reply_text(
+            f"❌ Il file non è un DB SQLite valido: {why}",
+            protect_content=True
+        )
         tmp.unlink(missing_ok=True)
         return
 
@@ -396,7 +414,11 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await aio.sleep(0.05)
 
     await info_msg.edit_text(
-        f"✅ Broadcast finito\nTotali: {total}\nInviati: {sent}\nBloccati: {blocked}\nErrori: {failed}",
+        f"✅ Broadcast finito\n"
+        f"Totali: {total}\n"
+        f"Inviati: {sent}\n"
+        f"Bloccati: {blocked}\n"
+        f"Errori: {failed}",
         protect_content=True
     )
 
@@ -412,11 +434,11 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(on_button))
 
-    app.add_handler(CommandHandler("status",    status_cmd))
-    app.add_handler(CommandHandler("utenti",    utenti_cmd))
-    app.add_handler(CommandHandler("backup",    backup_cmd))
+    app.add_handler(CommandHandler("status",     status_cmd))
+    app.add_handler(CommandHandler("utenti",     utenti_cmd))
+    app.add_handler(CommandHandler("backup",     backup_cmd))
     app.add_handler(CommandHandler("restore_db", restore_db))
-    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    app.add_handler(CommandHandler("broadcast",  broadcast_cmd))
 
     log.info("✅ BOT AVVIATO — %s", VERSION)
     app.run_polling()
