@@ -1,15 +1,15 @@
 # =====================================================
-# CROW FAMILY BOT — FULL v1.7 PROTECT + PIN + BROADCAST_DELETE
+# CROW FAMILY BOT – FULL v1.7
+# PROTECT + PIN + BROADCAST_DELETE
 # - 3 bottoni: MENÙ, CONTATTI, VETRINA (+ Indietro)
 # - /status, /utenti (CSV), /backup, /restore_db (MERGE)
 # - /broadcast: invia a tutti (testo o copia media in reply)
-# - /broadcast_delete: prova a cancellare l'ULTIMO broadcast da tutte le chat
-# - protect_content=True su tutti i contenuti (tranne file backup)
-# - DB e backup su disco montato (/var/data) → non perdi iscritti ai deploy
-# - Messaggio fissato AUTOMATICO: "👥 Iscritti Crow Family {totale}"
+# - /broadcast_delete: prova a cancellare l'ULTIMO broadcast
+#   da tutte le chat (finché il bot non viene riavviato)
+# - protect_content=True su tutto (tranne file backup)
 # =====================================================
 
-import os, csv, shutil, logging, sqlite3, asyncio as aio
+import os, csv, shutil, logging, sqlite3, asyncio as aio, zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 from telegram.error import RetryAfter, Forbidden, BadRequest, NetworkError
 
-VERSION = "CROW-FAMILY-1.7"
+VERSION = "CROW-FULL-1.7-PROTECT-BDEL"
 
 # ---------------- LOG ----------------
 logging.basicConfig(
@@ -35,14 +35,14 @@ BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/var/data/backup")
 
 PHOTO_URL = os.environ.get(
     "PHOTO_URL",
-    "https://i.postimg.cc/bv4ssL2t/2A3BDCFD-2D21-41BC-8BFA-9C5D238E5C3B.jpg",  # cambia con il logo Crow Family
+    "https://i.postimg.cc/bv4ssL2t/2A3BDCFD-2D21-41BC-8BFA-9C5D238E5C3B.jpg",
 )
 
 WELCOME_TEXT = os.environ.get(
     "WELCOME_TEXT",
     "👑 Benvenuto nel BOT Ufficiale CROW FAMILY\n"
     "Qui non entri per caso… qui entri se sei vero.\n\n"
-    "🔥 Qualità\n🤝 Rispetto\n🖤 Mentalità\n🕊 Famiglia prima di tutto\n\n"
+    "🔥 Qualità\n🤝 Rispetto\n🖤 Mentalità\n🪶 Famiglia prima di tutto\n\n"
     "Resta connesso, segui gli aggiornamenti e fai parte di qualcosa di reale."
 )
 
@@ -54,13 +54,7 @@ MENU_PAGE_TEXT = os.environ.get(
 
 INFO_PAGE_TEXT = os.environ.get(
     "INFO_PAGE_TEXT",
-    "📲 CONTATTI CROW FAMILY\n"
-    "Scrivi qui i tuoi contatti / regole / info."
-)
-
-VETRINA_URL = os.environ.get(
-    "VETRINA_URL",
-    "https://bpfam.github.io/Apulian-Dealer/index.html"  # cambia se hai una pagina vetrina diversa
+    "📲 CONTATTI & INFO — CROW FAMILY"
 )
 
 # ---------------- ADMIN ----------------
@@ -85,23 +79,14 @@ def is_admin(uid: int | None) -> bool:
 def init_db():
     Path(DB_FILE).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE)
-    # utenti
     conn.execute("""
     CREATE TABLE IF NOT EXISTS users(
         user_id INTEGER PRIMARY KEY,
-        username   TEXT,
+        username TEXT,
         first_name TEXT,
-        last_name  TEXT,
+        last_name TEXT,
         first_seen TEXT,
-        last_seen  TEXT
-    )""")
-    # messaggi degli ultimi broadcast (per cancellarli)
-    conn.execute("""
-    CREATE TABLE IF NOT EXISTS broadcast_msgs(
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        bcast_id TEXT,
-        chat_id  INTEGER,
-        msg_id   INTEGER
+        last_seen TEXT
     )""")
     conn.commit()
     conn.close()
@@ -115,9 +100,7 @@ def upsert_user(u):
     cur.execute("SELECT 1 FROM users WHERE user_id=?", (u.id,))
     if cur.fetchone():
         cur.execute("""
-        UPDATE users
-        SET username=?, first_name=?, last_name=?, last_seen=?
-        WHERE user_id=?
+        UPDATE users SET username=?, first_name=?, last_name=?, last_seen=? WHERE user_id=?
         """, (u.username, u.first_name, u.last_name, now, u.id))
     else:
         cur.execute("""
@@ -127,7 +110,7 @@ def upsert_user(u):
     conn.commit()
     conn.close()
 
-def count_users() -> int:
+def count_users():
     conn = sqlite3.connect(DB_FILE)
     n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     conn.close()
@@ -158,22 +141,25 @@ def is_sqlite_db(path: str):
     except Exception as e:
         return False, f"Errore lettura: {e}"
 
-# ---------------- KEYBOARD ----------------
+# ---------------- TASTIERA ----------------
 def kb_home():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📖 MENÙ",     callback_data="MENU"),
+            InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
             InlineKeyboardButton("📲 CONTATTI", callback_data="INFO"),
         ],
         [
-            InlineKeyboardButton("🎥 VETRINA", url=VETRINA_URL),
-        ],
+            InlineKeyboardButton(
+                "🎥 VETRINA",
+                url="https://bpfam.github.io/Crow-Family-/index.html"
+            )
+        ]
     ])
 
 def kb_back():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Indietro", callback_data="HOME")]
-    ])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Indietro", callback_data="HOME")
+    ]])
 
 # ---------------- START + PIN AUTO ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,41 +168,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         upsert_user(u)
 
-    # foto benvenuto
+    # foto logo
     try:
         await chat.send_photo(PHOTO_URL, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio foto: {e}")
 
-    # testo + bottoni
+    # testo benvenuto + bottoni
     try:
         await chat.send_message(
             WELCOME_TEXT,
             reply_markup=kb_home(),
-            protect_content=True,
+            protect_content=True
         )
     except Exception as e:
         log.warning(f"Errore invio welcome: {e}")
 
-    # messaggio fissato con iscritti
+    # messaggio fissato con conteggio iscritti
     try:
         total = count_users()
         stats_msg = await chat.send_message(
             f"👥 Iscritti Crow Family {total}",
-            protect_content=True,
+            protect_content=True
         )
         try:
             await context.bot.pin_chat_message(
                 chat_id=chat.id,
                 message_id=stats_msg.message_id,
-                disable_notification=True,
+                disable_notification=True
             )
         except Exception as e:
             log.warning(f"Errore pin messaggio stats: {e}")
     except Exception as e:
         log.warning(f"Errore invio stats: {e}")
 
-# ---------------- BOTTONI ----------------
+# ---------------- BOTTONI INLINE ----------------
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -237,8 +223,9 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ Online v{VERSION}\n"
         f"👥 Utenti: {count_users()}\n"
-        f"DB: {DB_FILE}\nBackup dir: {BACKUP_DIR}",
-        protect_content=True,
+        f"DB: {DB_FILE}\n"
+        f"Backup dir: {BACKUP_DIR}",
+        protect_content=True
     )
 
 async def utenti_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,7 +257,7 @@ async def utenti_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(csv_path, "rb") as fh:
         await update.message.reply_document(
             document=InputFile(fh, filename=csv_path.name),
-            protect_content=True,
+            protect_content=True
         )
 
 # ✅ BACKUP SBLOCCATO (scaricabile)
@@ -285,18 +272,16 @@ async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     Path(BACKUP_DIR).mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    db_out = Path(BACKUP_DIR) / f"backup_{stamp}.db"
+    db_out  = Path(BACKUP_DIR) / f"backup_{stamp}.db"
 
     shutil.copy2(DB_FILE, db_out)
 
     with open(db_out, "rb") as fh:
-        # qui NON metto protect_content=True così puoi scaricarlo e inoltrarlo
         await update.message.reply_document(
             document=InputFile(fh, filename=db_out.name),
-            caption="✅ Backup pronto da scaricare",
+            caption="✅ Backup pronto da scaricare"
         )
 
-# --- RESTORE DB (merge, non cancella) ---
 async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -305,7 +290,7 @@ async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg.reply_to_message or not msg.reply_to_message.document:
         await update.message.reply_text(
             "Per ripristinare: rispondi a un file .db con /restore_db",
-            protect_content=True,
+            protect_content=True
         )
         return
 
@@ -318,10 +303,7 @@ async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ok, why = is_sqlite_db(str(tmp))
     if not ok:
-        await update.message.reply_text(
-            f"❌ Il file non è un DB SQLite valido: {why}",
-            protect_content=True,
-        )
+        await update.message.reply_text(f"❌ Il file non è un DB SQLite valido: {why}", protect_content=True)
         tmp.unlink(missing_ok=True)
         return
 
@@ -351,8 +333,9 @@ async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tmp.unlink(missing_ok=True)
 
 # ---------------- BROADCAST + DELETE ----------------
+LAST_BROADCAST: dict[int, int] = {}  # chat_id -> message_id
+
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Invia un messaggio a tutti gli utenti (testo o copia reply) e salva gli ID per la cancellazione."""
     if not is_admin(update.effective_user.id):
         return
 
@@ -363,143 +346,114 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text("Nessun utente nel DB.", protect_content=True)
         return
 
-    mode = "text"
     text_body = None
-
+    mode = "text"
     if m.reply_to_message:
         mode = "copy"
+        text_preview = (
+            m.reply_to_message.text
+            or m.reply_to_message.caption
+            or "(media)"
+        )
     else:
         text_body = " ".join(context.args) if context.args else None
         if not text_body:
             await m.reply_text(
                 "Uso: /broadcast <testo> oppure in reply a un contenuto /broadcast",
-                protect_content=True,
+                protect_content=True
             )
             return
-
-    # nuovo ID broadcast
-    bcast_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-    # pulizia eventuali record orfani (non obbligatorio, ma pulito)
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute("DELETE FROM broadcast_msgs WHERE bcast_id IS NULL")
-    conn.commit()
+        text_preview = (text_body[:120] + "…") if len(text_body) > 120 else text_body
 
     sent = blocked = failed = 0
-
     info_msg = await m.reply_text(
-        f"📣 Broadcast avviato\nUtenti: {total}",
-        protect_content=True,
+        f"📣 Broadcast iniziato\nUtenti: {total}\nAnteprima: {text_preview}",
+        protect_content=True
     )
 
-    try:
-        for u in users:
-            chat_id = u["user_id"]
+    LAST_BROADCAST.clear()
+
+    for u in users:
+        chat_id = u["user_id"]
+        try:
+            if mode == "copy" and m.reply_to_message:
+                msg_out = await m.reply_to_message.copy(
+                    chat_id=chat_id,
+                    protect_content=True
+                )
+            else:
+                msg_out = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text_body,
+                    protect_content=True
+                )
+            LAST_BROADCAST[chat_id] = msg_out.message_id
+            sent += 1
+        except Forbidden:
+            blocked += 1
+        except RetryAfter as e:
+            await aio.sleep(e.retry_after + 1)
             try:
                 if mode == "copy" and m.reply_to_message:
-                    msg = await m.reply_to_message.copy(
+                    msg_out = await m.reply_to_message.copy(
                         chat_id=chat_id,
-                        protect_content=True,
+                        protect_content=True
                     )
                 else:
-                    msg = await context.bot.send_message(
+                    msg_out = await context.bot.send_message(
                         chat_id=chat_id,
                         text=text_body,
-                        protect_content=True,
+                        protect_content=True
                     )
-
-                # salvo ID messaggio per poterlo cancellare dopo
-                conn.execute(
-                    "INSERT INTO broadcast_msgs(bcast_id,chat_id,msg_id) VALUES(?,?,?)",
-                    (bcast_id, chat_id, msg.message_id),
-                )
+                LAST_BROADCAST[chat_id] = msg_out.message_id
                 sent += 1
-
-            except Forbidden:
-                blocked += 1
-            except RetryAfter as e:
-                await aio.sleep(e.retry_after + 1)
-                try:
-                    if mode == "copy" and m.reply_to_message:
-                        msg = await m.reply_to_message.copy(
-                            chat_id=chat_id,
-                            protect_content=True,
-                        )
-                    else:
-                        msg = await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=text_body,
-                            protect_content=True,
-                        )
-                    conn.execute(
-                        "INSERT INTO broadcast_msgs(bcast_id,chat_id,msg_id) VALUES(?,?,?)",
-                        (bcast_id, chat_id, msg.message_id),
-                    )
-                    sent += 1
-                except Exception:
-                    failed += 1
-            except (BadRequest, NetworkError, Exception):
+            except Exception:
                 failed += 1
+        except (BadRequest, NetworkError, Exception):
+            failed += 1
 
-            await aio.sleep(0.05)
-
-        conn.commit()
-    finally:
-        conn.close()
+        await aio.sleep(0.05)
 
     await info_msg.edit_text(
-        f"✅ Broadcast completato (ID {bcast_id})\n"
-        f"Totali: {total}\nInviati: {sent}\nBloccati: {blocked}\nErrori: {failed}",
-        protect_content=True,
+        f"✅ Broadcast finito\nTotali: {total}\nInviati: {sent}\n"
+        f"Bloccati: {blocked}\nErrori: {failed}",
+        protect_content=True
     )
 
 async def broadcast_delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancella l'ULTIMO broadcast salvato (entro i limiti di Telegram)."""
     if not is_admin(update.effective_user.id):
         return
 
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("SELECT bcast_id FROM broadcast_msgs ORDER BY id DESC LIMIT 1")
-    row = cur.fetchone()
-    if not row:
-        conn.close()
+    if not LAST_BROADCAST:
         await update.message.reply_text(
-            "ℹ️ Nessun broadcast da cancellare.",
-            protect_content=True,
+            "❌ Nessun broadcast recente da cancellare (o bot riavviato).",
+            protect_content=True
         )
         return
 
-    bcast_id = row[0]
-    cur.execute("SELECT chat_id, msg_id FROM broadcast_msgs WHERE bcast_id=?", (bcast_id,))
-    rows = cur.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text(
-            f"ℹ️ Nessun messaggio trovato per broadcast {bcast_id}.",
-            protect_content=True,
-        )
-        return
-
-    deleted = failed = 0
-    for chat_id, msg_id in rows:
+    ok = err = 0
+    for chat_id, msg_id in list(LAST_BROADCAST.items()):
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            deleted += 1
+            ok += 1
+        except (Forbidden, BadRequest):
+            err += 1
+        except RetryAfter as e:
+            await aio.sleep(e.retry_after + 1)
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                ok += 1
+            except Exception:
+                err += 1
         except Exception:
-            failed += 1
+            err += 1
+        await aio.sleep(0.05)
 
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute("DELETE FROM broadcast_msgs WHERE bcast_id=?", (bcast_id,))
-    conn.commit()
-    conn.close()
+    LAST_BROADCAST.clear()
 
     await update.message.reply_text(
-        f"🗑 Broadcast {bcast_id} cancellato.\n"
-        f"Messaggi rimossi: {deleted}\n"
-        f"Falliti (troppo vecchi / errori): {failed}",
-        protect_content=True,
+        f"🧹 Broadcast cancellato.\n✅ Eliminati: {ok}\n⚠️ Errori: {err}",
+        protect_content=True
     )
 
 # ---------------- MAIN ----------------
@@ -511,16 +465,14 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # pubblici
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(on_button))
 
-    # admin
-    app.add_handler(CommandHandler("status",           status_cmd))
-    app.add_handler(CommandHandler("utenti",           utenti_cmd))
-    app.add_handler(CommandHandler("backup",           backup_cmd))
-    app.add_handler(CommandHandler("restore_db",       restore_db))
-    app.add_handler(CommandHandler("broadcast",        broadcast_cmd))
+    app.add_handler(CommandHandler("status",          status_cmd))
+    app.add_handler(CommandHandler("utenti",          utenti_cmd))
+    app.add_handler(CommandHandler("backup",          backup_cmd))
+    app.add_handler(CommandHandler("restore_db",      restore_db))
+    app.add_handler(CommandHandler("broadcast",       broadcast_cmd))
     app.add_handler(CommandHandler("broadcast_delete", broadcast_delete_cmd))
 
     log.info("✅ BOT AVVIATO — %s", VERSION)
