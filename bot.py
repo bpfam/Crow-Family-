@@ -1,6 +1,6 @@
 # =====================================================
 # CROW FAMILY BOT — FULL v1.6 PROTECT + PIN AUTO
-# - Menu + Info con bottone Indietro + tasto Vetrina
+# - Menu + Info con bottone Indietro
 # - /status, /utenti (CSV), /backup, /restore_db (MERGE), /broadcast
 # - protect_content=True su tutti i contenuti
 # - SOLO /backup è SBLOCCATO per il download
@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 from telegram.error import RetryAfter, Forbidden, BadRequest, NetworkError
 
-VERSION = "CROW-FULL-1.6-PROTECT-AUTO"
+VERSION = "CROW-FAMILY-FULL-1.6-PROTECT-AUTO"
 
 # ---------------- LOG ----------------
 logging.basicConfig(
@@ -28,8 +28,10 @@ log = logging.getLogger("crow-family")
 
 # ---------------- ENV ----------------
 BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
-DB_FILE     = os.environ.get("DB_FILE", "/var/data/users.db")
-BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/var/data/backup")
+
+# ATTENZIONE: devono puntare al DISK montato su Render
+DB_FILE     = os.environ.get("DB_FILE", "/opt/render/project/data/users.db")
+BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/opt/render/project/data/backup")
 
 PHOTO_URL = os.environ.get(
     "PHOTO_URL",
@@ -38,21 +40,16 @@ PHOTO_URL = os.environ.get(
 
 WELCOME_TEXT = os.environ.get(
     "WELCOME_TEXT",
-    "🥇 BENVENUTO NEL BOT UFFICIALE DI CROW FAMILY 🥇\nScegli un’opzione qui sotto."
+    "🐦‍🔥 BENVENUTO NEL BOT UFFICIALE CROW FAMILY 🐦‍🔥\n"
+    "Scegli un’opzione qui sotto."
 )
 MENU_PAGE_TEXT = os.environ.get(
     "MENU_PAGE_TEXT",
-    "📖 MENÙ — CROW FAMILY\n• Voce A\n• Voce B\n• Voce C"
+    "📖 MENÙ CROW FAMILY\n• Voce A\n• Voce B\n• Voce C"
 )
 INFO_PAGE_TEXT = os.environ.get(
     "INFO_PAGE_TEXT",
     "📲 CONTATTI & INFO — CROW FAMILY"
-)
-
-# 🔗 Vetrina: se non setti VETRINA_URL usa il link di default
-VETRINA_URL = os.environ.get(
-    "VETRINA_URL",
-    "https://bpfam.github.io/Apulian-Dealer/index.html"
 )
 
 # ---------------- ADMIN ----------------
@@ -70,7 +67,6 @@ log.info("ADMIN_IDS: %s", ADMIN_IDS)
 
 def is_admin(uid: int | None) -> bool:
     if not ADMIN_IDS:
-        # Se non configuri ADMIN_IDS, chiunque è admin (sconsigliato)
         return True
     return bool(uid) and uid in ADMIN_IDS
 
@@ -146,12 +142,6 @@ def kb_home():
         [
             InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
             InlineKeyboardButton("📲 CONTATTI", callback_data="INFO")
-        ],
-        [
-            InlineKeyboardButton(
-                "🎥 VETRINA",
-                url=VETRINA_URL
-            )
         ]
     ])
 
@@ -167,11 +157,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         upsert_user(u)
 
+    # foto di benvenuto
     try:
         await chat.send_photo(PHOTO_URL, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio foto: {e}")
 
+    # messaggio di benvenuto (anche se per qualche motivo fallisse,
+    # comunque sotto mettiamo la tastiera sul messaggio "Iscritti")
     try:
         await chat.send_message(
             WELCOME_TEXT,
@@ -181,11 +174,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log.warning(f"Errore invio welcome: {e}")
 
-    # Messaggio fissato con numero iscritti
+    # messaggio iscritti + PIN + TASTIERA (qui sicuro vedi i bottoni)
     try:
         total = count_users()
         stats_msg = await chat.send_message(
             f"👥 Iscritti Crow Family {total}",
+            reply_markup=kb_home(),      # 👈 QUI i bottoni
             protect_content=True
         )
         try:
