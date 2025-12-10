@@ -1,10 +1,8 @@
 # =====================================================
 # CROW FAMILY BOT — FULL v1.6 PROTECT + PIN AUTO
 # - 3 bottoni: MENÙ, CONTATTI, VETRINA
-# - Menu + Info con bottone Indietro
 # - /status, /utenti (CSV), /backup, /restore_db (MERGE), /broadcast
-# - protect_content=True su tutti i contenuti (tranne /backup)
-# - SOLO /backup è SBLOCCATO per il download
+# - protect_content=True su tutto (tranne file backup)
 # - Messaggio fissato AUTOMATICO: "👥 Iscritti Crow Family {totale}"
 # =====================================================
 
@@ -34,7 +32,6 @@ BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/var/data/backup")
 
 PHOTO_URL = os.environ.get(
     "PHOTO_URL",
-    # Logo di default: cambia qui o metti PHOTO_URL nelle variabili Render
     "https://i.postimg.cc/bv4ssL2t/2A3BDCFD-2D21-41BC-8BFA-9C5D238E5C3B.jpg",
 )
 
@@ -61,9 +58,9 @@ INFO_PAGE_TEXT = os.environ.get(
     "Qui puoi mettere Telegram, Instagram, canali, ecc."
 )
 
-VETRINA_URL = os.environ.get(
+VETRINA_URL_ENV = os.environ.get(
     "VETRINA_URL",
-    "https://bpfam.github.io/Apulian-Dealer/index.html"  # cambiala nelle variabili quando vuoi
+    "https://bpfam.github.io/Apulian-Dealer/index.html"
 )
 
 # ---------------- ADMIN ----------------
@@ -151,22 +148,32 @@ def is_sqlite_db(path: str):
         return False, f"Errore lettura: {e}"
 
 # ---------------- KEYBOARD ----------------
+def _safe_vetrina_url() -> str | None:
+    url = VETRINA_URL_ENV.strip()
+    if not url:
+        return None
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = "https://" + url
+    return url
+
 def kb_home():
-    # 3 bottoni: MENÙ, CONTATTI, VETRINA
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
-            InlineKeyboardButton("📲 CONTATTI", callback_data="INFO"),
-        ],
-        [
-            InlineKeyboardButton("🎥 VETRINA", url=VETRINA_URL),
-        ],
-    ])
+    url = _safe_vetrina_url()
+
+    row1 = [
+        InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
+        InlineKeyboardButton("📲 CONTATTI", callback_data="INFO"),
+    ]
+
+    if url:
+        row2 = [InlineKeyboardButton("🎥 VETRINA", url=url)]
+    else:
+        # Se la vetrina non è configurata, bottone che spiega cosa fare
+        row2 = [InlineKeyboardButton("🎥 VETRINA (OFF)", callback_data="VETRINA_OFF")]
+
+    return InlineKeyboardMarkup([row1, row2])
 
 def kb_back():
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Indietro", callback_data="HOME")
-    ]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Indietro", callback_data="HOME")]])
 
 # ---------------- START + PIN AUTO ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,23 +182,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         upsert_user(u)
 
-    # Foto/logo protetto
+    # Foto/logo
     try:
         await chat.send_photo(PHOTO_URL, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio foto: {e}")
 
-    # Messaggio di benvenuto con tastiera (3 bottoni)
+    # Benvenuto + bottoni
     try:
         await chat.send_message(
             WELCOME_TEXT,
             reply_markup=kb_home(),
             protect_content=True
         )
+    except BadRequest as e:
+        log.warning(f"Errore invio welcome con tastiera: {e}")
+        # Fallback: testo senza tastiera, così almeno vedi qualcosa
+        await chat.send_message(WELCOME_TEXT, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio welcome: {e}")
 
-    # Messaggio fissato con numero iscritti
+    # Messaggio fissato iscritti
     try:
         total = count_users()
         stats_msg = await chat.send_message(
@@ -222,6 +233,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.edit_text(INFO_PAGE_TEXT, reply_markup=kb_back())
     elif q.data == "HOME":
         await q.message.edit_text(WELCOME_TEXT, reply_markup=kb_home())
+    elif q.data == "VETRINA_OFF":
+        await q.message.edit_text(
+            "🎥 La vetrina non è ancora configurata.\n\n"
+            "Imposta la variabile `VETRINA_URL` su Render con un link che inizia per https://",
+            reply_markup=kb_back()
+        )
 
 # ---------------- ADMIN COMANDI ----------------
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,7 +284,7 @@ async def utenti_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             protect_content=True
         )
 
-# ✅ BACKUP SBLOCCATO (scaricabile)
+# ✅ BACKUP SBLOCCATO
 async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -289,7 +306,7 @@ async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption="✅ Backup pronto da scaricare"
         )
 
-# ✅ RESTORE MERGE (NON cancella, aggiorna/aggiunge utenti)
+# ✅ RESTORE MERGE
 async def restore_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
