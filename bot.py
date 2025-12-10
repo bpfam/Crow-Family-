@@ -1,10 +1,10 @@
 # =====================================================
-# APULIAN DEALER BOT — FULL v1.6 PROTECT + PIN AUTO
-# - Menu + Info con bottone Indietro
+# CROW FAMILY BOT — FULL v1.6 PROTECT + PIN AUTO
+# - Menu + Info con bottone Indietro + tasto Vetrina
 # - /status, /utenti (CSV), /backup, /restore_db (MERGE), /broadcast
 # - protect_content=True su tutti i contenuti
 # - SOLO /backup è SBLOCCATO per il download
-# - Messaggio fissato AUTOMATICO: "👥 Iscritti Apulian Dealer {totale}"
+# - Messaggio fissato AUTOMATICO: "👥 Iscritti Crow Family {totale}"
 # =====================================================
 
 import os, csv, shutil, logging, sqlite3, asyncio as aio, zipfile
@@ -17,14 +17,14 @@ from telegram.ext import (
 )
 from telegram.error import RetryAfter, Forbidden, BadRequest, NetworkError
 
-VERSION = "APULIAN-FULL-1.6-PROTECT-AUTO"
+VERSION = "CROW-FULL-1.6-PROTECT-AUTO"
 
 # ---------------- LOG ----------------
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
 )
-log = logging.getLogger("apulian-dealer")
+log = logging.getLogger("crow-family")
 
 # ---------------- ENV ----------------
 BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
@@ -38,15 +38,15 @@ PHOTO_URL = os.environ.get(
 
 WELCOME_TEXT = os.environ.get(
     "WELCOME_TEXT",
-    "🥇 BENVENUTO NEL BOT UFFICIALE DI APULIAN DEALER 🥇\nScegli un’opzione qui sotto."
+    "🥇 BENVENUTO NEL BOT UFFICIALE DI CROW FAMILY 🥇\nScegli un’opzione qui sotto."
 )
 MENU_PAGE_TEXT = os.environ.get(
     "MENU_PAGE_TEXT",
-    "📖 MENÙ\n• Voce A\n• Voce B\n• Voce C"
+    "📖 MENÙ — CROW FAMILY\n• Voce A\n• Voce B\n• Voce C"
 )
 INFO_PAGE_TEXT = os.environ.get(
     "INFO_PAGE_TEXT",
-    "📲 CONTATTI & INFO — APULIAN DEALER"
+    "📲 CONTATTI & INFO — CROW FAMILY"
 )
 
 # 🔗 Vetrina: se non setti VETRINA_URL usa il link di default
@@ -185,7 +185,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         total = count_users()
         stats_msg = await chat.send_message(
-            f"👥 Iscritti Apulian Dealer {total}",
+            f"👥 Iscritti Crow Family {total}",
             protect_content=True
         )
         try:
