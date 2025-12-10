@@ -29,7 +29,7 @@ log = logging.getLogger("crow-family")
 # ---------------- ENV ----------------
 BOT_TOKEN   = os.environ.get("BOT_TOKEN", "")
 
-# ATTENZIONE: devono puntare al DISK montato su Render
+# devono puntare al DISK
 DB_FILE     = os.environ.get("DB_FILE", "/opt/render/project/data/users.db")
 BACKUP_DIR  = os.environ.get("BACKUP_DIR", "/opt/render/project/data/backup")
 
@@ -40,8 +40,10 @@ PHOTO_URL = os.environ.get(
 
 WELCOME_TEXT = os.environ.get(
     "WELCOME_TEXT",
-    "🐦‍🔥 BENVENUTO NEL BOT UFFICIALE CROW FAMILY 🐦‍🔥\n"
-    "Scegli un’opzione qui sotto."
+    "👑 Benvenuto nel BOT Ufficiale CROW FAMILY\n"
+    "Qui non entri per caso… qui entri se sei vero.\n\n"
+    "🔥 Qualità\n🤝 Rispetto\n🖤 Mentalità\n🐦 Famiglia prima di tutto\n\n"
+    "Resta connesso, segui gli aggiornamenti e fai parte di qualcosa di reale."
 )
 MENU_PAGE_TEXT = os.environ.get(
     "MENU_PAGE_TEXT",
@@ -50,6 +52,11 @@ MENU_PAGE_TEXT = os.environ.get(
 INFO_PAGE_TEXT = os.environ.get(
     "INFO_PAGE_TEXT",
     "📲 CONTATTI & INFO — CROW FAMILY"
+)
+
+VETRINA_URL = os.environ.get(
+    "VETRINA_URL",
+    "https://bpfam.github.io/Apulian-Dealer/index.html"   # puoi cambiarla dalla variabile
 )
 
 # ---------------- ADMIN ----------------
@@ -141,7 +148,8 @@ def kb_home():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📖 MENÙ", callback_data="MENU"),
-            InlineKeyboardButton("📲 CONTATTI", callback_data="INFO")
+            InlineKeyboardButton("📲 CONTATTI", callback_data="INFO"),
+            InlineKeyboardButton("🎥 VETRINA", url=VETRINA_URL),
         ]
     ])
 
@@ -157,14 +165,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         upsert_user(u)
 
-    # foto di benvenuto
     try:
         await chat.send_photo(PHOTO_URL, protect_content=True)
     except Exception as e:
         log.warning(f"Errore invio foto: {e}")
 
-    # messaggio di benvenuto (anche se per qualche motivo fallisse,
-    # comunque sotto mettiamo la tastiera sul messaggio "Iscritti")
+    # Messaggio di benvenuto con TASTIERA (unica tastiera del bot)
     try:
         await chat.send_message(
             WELCOME_TEXT,
@@ -174,12 +180,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log.warning(f"Errore invio welcome: {e}")
 
-    # messaggio iscritti + PIN + TASTIERA (qui sicuro vedi i bottoni)
+    # Messaggio iscritti SOLO TESTO, senza tastiera
     try:
         total = count_users()
         stats_msg = await chat.send_message(
             f"👥 Iscritti Crow Family {total}",
-            reply_markup=kb_home(),      # 👈 QUI i bottoni
             protect_content=True
         )
         try:
