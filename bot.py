@@ -151,7 +151,7 @@ def kb_home():
         [
             InlineKeyboardButton(
                 "🎥 VETRINA",
-                url="https://bpfam.github.io/Crow-Family-/index.html"
+                url="https://bpfam.github.io/Crow-Family/vetrina.html"
             )
         ]
     ])
